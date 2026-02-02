@@ -1,0 +1,96 @@
+# ==============================================================================
+# Infrastructure Deployment Workflow
+# Deploys Azure infrastructure using Bicep
+# Trigger: Manual (workflow_dispatch)
+# ==============================================================================
+
+name: Infrastructure Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      location:
+        description: "Azure region"
+        required: false
+        default: "centralindia"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Resource Group (if not exists)
+        run: |
+          az group create \
+            --name ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --location ${{ inputs.location || 'centralindia' }} \
+            --tags environment=${{ inputs.environment }} project=calculator-webapp
+
+      - name: Validate Bicep template
+        run: |
+          az deployment group validate \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters @infra/params.${{ inputs.environment }}.json \
+            --parameters location=${{ inputs.location || 'centralindia' }}
+
+      - name: Deploy Infrastructure
+        id: deploy
+        run: |
+          DEPLOYMENT_OUTPUT=$(az deployment group create \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters @infra/params.${{ inputs.environment }}.json \
+            --parameters location=${{ inputs.location || 'centralindia' }} \
+            --query properties.outputs -o json)
+          
+          echo "Deployment outputs:"
+          echo "$DEPLOYMENT_OUTPUT"
+          
+          # Extract outputs for summary
+          WEB_APP_NAME=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.webAppName.value')
+          WEB_APP_URL=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.webAppUrl.value')
+          
+          echo "web_app_name=$WEB_APP_NAME" >> $GITHUB_OUTPUT
+          echo "web_app_url=$WEB_APP_URL" >> $GITHUB_OUTPUT
+
+      - name: Deployment Summary
+        run: |
+          echo "## Infrastructure Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | ${{ vars.AZURE_RESOURCE_GROUP }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Location | ${{ inputs.location || 'centralindia' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Web App Name | ${{ steps.deploy.outputs.web_app_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Web App URL | ${{ steps.deploy.outputs.web_app_url }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Azure Logout
+        if: always()
+        run: az logout

@@ -1,0 +1,88 @@
+# ==============================================================================
+# Metrics Dashboard Workflow
+# Generates DevOps/DevSecOps/Dependency metrics and publishes to GitHub Pages
+# Runs on: schedule (every 6 hours), workflow_dispatch
+# ==============================================================================
+
+name: Metrics Dashboard
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Metrics window in days"
+        required: false
+        default: "30"
+
+permissions:
+  contents: write
+  pages: write
+
+env:
+  METRICS_WINDOW_DAYS: ${{ github.event.inputs.window_days || '30' }}
+
+jobs:
+  generate-metrics:
+    name: Generate Metrics Dashboard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+          pip install -r requirements.txt
+
+      - name: Compute outdated dependencies
+        run: |
+          mkdir -p site
+          OUTDATED_COUNT=$(pip list --outdated --format=json | python -c "import sys, json; print(len(json.load(sys.stdin)))")
+          echo "{\"outdated_count\": $OUTDATED_COUNT, \"generated_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > site/dependency.json
+          echo "Outdated dependencies: $OUTDATED_COUNT"
+          cat site/dependency.json
+
+      - name: Collect metrics from GitHub API
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          METRICS_WINDOW_DAYS: ${{ env.METRICS_WINDOW_DAYS }}
+        run: |
+          python metrics/main.py
+
+      - name: Render dashboard
+        run: |
+          python metrics/render_dashboard.py
+
+      - name: List site contents
+        run: |
+          echo "Site directory contents:"
+          ls -la site/
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "Update metrics dashboard - ${{ github.run_id }}"
+
+      - name: Summary
+        run: |
+          echo "## Metrics Dashboard Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Window**: ${{ env.METRICS_WINDOW_DAYS }} days" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dashboard URL**: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
