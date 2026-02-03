@@ -463,17 +463,37 @@ jobs:
           path: site/
           retention-days: 90
 
-      - name: Commit Dashboard
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add site/ || true
-          git diff --staged --quiet || git commit -m "📊 Update metrics dashboard [skip ci]"
-          git push || true
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  # ============================================================================
+  # Stage 6: Deploy to GitHub Pages
+  # ============================================================================
+  deploy-pages:
+    name: 🌐 Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [preflight, generate-dashboard]
+    if: always() && needs.generate-dashboard.result == 'success'
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
       - name: Final Summary
         run: |
-          echo "### 📊 Dashboard Generated" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Dashboard Deployed to GitHub Pages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🌐 **Live Dashboard:** ${{ steps.deployment.outputs.page_url }}dashboard.html" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Category | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -482,4 +502,4 @@ jobs:
           echo "| Performance | ${{ needs.performance-metrics.result == 'success' && '✅' || '⚠️' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Azure Metrics | ${{ needs.azure-metrics.result == 'success' && '✅' || '⚠️' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📁 Dashboard available in artifacts: \`metrics-dashboard\`" >> $GITHUB_STEP_SUMMARY
+          echo "📁 Dashboard also available in artifacts: \`metrics-dashboard\`" >> $GITHUB_STEP_SUMMARY
