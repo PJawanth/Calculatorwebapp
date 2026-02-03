@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>DevOps Metrics Dashboard</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+    .dashboard { max-width: 1200px; margin: 0 auto; }
+    h1 { text-align: center; margin-bottom: 30px; color: #58a6ff; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+    .card h2 { font-size: 14px; color: #8b949e; margin-bottom: 15px; text-transform: uppercase; }
+    .metric { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #21262d; }
+    .metric:last-child { border-bottom: none; }
+    .metric-name { color: #c9d1d9; }
+    .metric-value { font-size: 20px; font-weight: bold; }
+    .elite { color: #3fb950; }
+    .high { color: #58a6ff; }
+    .medium { color: #d29922; }
+    .low { color: #f85149; }
+    .timestamp { text-align: center; color: #8b949e; margin-top: 30px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <h1>📊 DevOps & DevSecOps Dashboard</h1>
+    <div class="grid">
+      <div class="card">
+        <h2>📈 DORA Metrics</h2>
+        <div id="dora-metrics"></div>
+      </div>
+      <div class="card">
+        <h2>🔒 Security</h2>
+        <div id="security-metrics"></div>
+      </div>
+      <div class="card">
+        <h2>⚡ Performance</h2>
+        <div id="performance-metrics"></div>
+      </div>
+      <div class="card">
+        <h2>ℹ️ Application Info</h2>
+        <div id="app-info"></div>
+      </div>
+    </div>
+    <p class="timestamp" id="timestamp"></p>
+  </div>
+  <script>
+    fetch('metrics.json').then(r => r.json()).then(data => {
+      document.getElementById('dora-metrics').innerHTML = `
+        <div class="metric"><span class="metric-name">Deployment Frequency</span><span class="metric-value ${data.dora.deployment_frequency >= 30 ? 'elite' : data.dora.deployment_frequency >= 7 ? 'high' : 'medium'}">${data.dora.deployment_frequency}/month</span></div>
+        <div class="metric"><span class="metric-name">Lead Time</span><span class="metric-value ${data.dora.lead_time_minutes < 60 ? 'elite' : 'high'}">${data.dora.lead_time_minutes} min</span></div>
+        <div class="metric"><span class="metric-name">Change Failure Rate</span><span class="metric-value ${data.dora.change_failure_rate <= 5 ? 'elite' : data.dora.change_failure_rate <= 15 ? 'high' : 'medium'}">${data.dora.change_failure_rate}%</span></div>
+        <div class="metric"><span class="metric-name">MTTR</span><span class="metric-value high">${data.dora.mttr}</span></div>
+      `;
+      document.getElementById('security-metrics').innerHTML = `
+        <div class="metric"><span class="metric-name">Security Score</span><span class="metric-value ${data.security.score >= 90 ? 'elite' : data.security.score >= 70 ? 'high' : 'medium'}">${data.security.score}%</span></div>
+        <div class="metric"><span class="metric-name">Vulnerabilities</span><span class="metric-value elite">${data.security.vulnerabilities}</span></div>
+      `;
+      document.getElementById('performance-metrics').innerHTML = `
+        <div class="metric"><span class="metric-name">Response Time</span><span class="metric-value ${data.performance.response_time_ms < 200 ? 'elite' : data.performance.response_time_ms < 500 ? 'high' : 'medium'}">${data.performance.response_time_ms}ms</span></div>
+        <div class="metric"><span class="metric-name">Uptime</span><span class="metric-value ${data.performance.uptime_percent >= 99 ? 'elite' : 'high'}">${data.performance.uptime_percent}%</span></div>
+      `;
+      document.getElementById('app-info').innerHTML = `
+        <div class="metric"><span class="metric-name">Application</span><span class="metric-value high">${data.application || 'N/A'}</span></div>
+        <div class="metric"><span class="metric-name">Run #</span><span class="metric-value">${data.github.run_number}</span></div>
+      `;
+      document.getElementById('timestamp').textContent = 'Last Updated: ' + new Date(data.timestamp).toLocaleString();
+    });
+  </script>
+</body>
+</html>
