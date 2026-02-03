@@ -144,6 +144,27 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Register Required Resource Providers
+        run: |
+          echo "🔧 Registering required Azure resource providers..."
+          
+          # Register providers (runs in parallel, waits for completion)
+          az provider register --namespace Microsoft.ContainerRegistry --wait || true
+          az provider register --namespace Microsoft.Web --wait || true
+          az provider register --namespace Microsoft.Resources --wait || true
+          
+          echo "✅ Resource providers registered"
+          
+          # Verify registration status
+          echo "### 🔧 Resource Provider Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Provider | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          for provider in Microsoft.ContainerRegistry Microsoft.Web Microsoft.Resources; do
+            STATUS=$(az provider show --namespace $provider --query "registrationState" -o tsv 2>/dev/null || echo "Unknown")
+            echo "| $provider | $STATUS |" >> $GITHUB_STEP_SUMMARY
+          done
+
       - name: Create Resource Group
         run: |
           echo "📁 Creating Resource Group: ${{ env.RESOURCE_GROUP }}"
