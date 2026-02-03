@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-02-03T10:17:41Z",
-  "application": "",
-  "url": "https://.azurewebsites.net",
+  "timestamp": "2026-02-03T11:54:09Z",
+  "application": "calculator-prod-app",
+  "url": "https://calculator-prod-app.azurewebsites.net",
   "dora": {
     "deployment_frequency": 1,
     "lead_time_minutes": 4,
@@ -13,11 +13,11 @@
     "vulnerabilities": "0 critical"
   },
   "performance": {
-    "response_time_ms": .07,
-    "uptime_percent": 0
+    "response_time_ms": 102.32,
+    "uptime_percent": 100
   },
   "github": {
-    "run_id": "21626232733",
-    "run_number": "1"
+    "run_id": "21629144077",
+    "run_number": "2"
   }
 }
