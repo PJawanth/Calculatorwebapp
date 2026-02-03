@@ -23,6 +23,18 @@ on:
         required: false
         default: false
         type: boolean
+      resource_group:
+        description: 'Azure Resource Group (leave empty to use vars)'
+        required: false
+        type: string
+      acr_name:
+        description: 'Azure Container Registry Name (leave empty to use vars)'
+        required: false
+        type: string
+      webapp_name:
+        description: 'Azure Web App Name (leave empty to use vars)'
+        required: false
+        type: string
 
 permissions:
   id-token: write
@@ -31,7 +43,10 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.11"
-  DOCKER_IMAGE_NAME: ${{ vars.AZURE_WEBAPP_NAME || 'calculator-app' }}
+  DOCKER_IMAGE_NAME: ${{ inputs.webapp_name || vars.AZURE_WEBAPP_NAME || 'calculator-app' }}
+  AZURE_RG: ${{ inputs.resource_group || vars.AZURE_RESOURCE_GROUP }}
+  AZURE_ACR: ${{ inputs.acr_name || vars.AZURE_ACR_NAME }}
+  AZURE_WEBAPP: ${{ inputs.webapp_name || vars.AZURE_WEBAPP_NAME }}
 
 jobs:
   # ============================================================================
@@ -42,32 +57,56 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ready: ${{ steps.check.outputs.ready }}
+      acr_name: ${{ steps.check.outputs.acr_name }}
+      webapp_name: ${{ steps.check.outputs.webapp_name }}
+      resource_group: ${{ steps.check.outputs.resource_group }}
 
     steps:
       - name: Check required variables
         id: check
         run: |
+          # Use inputs or fall back to vars
+          ACR_NAME="${{ inputs.acr_name || vars.AZURE_ACR_NAME }}"
+          WEBAPP_NAME="${{ inputs.webapp_name || vars.AZURE_WEBAPP_NAME }}"
+          RESOURCE_GROUP="${{ inputs.resource_group || vars.AZURE_RESOURCE_GROUP }}"
+          
           MISSING=""
           
-          if [ -z "${{ vars.AZURE_ACR_NAME }}" ]; then
+          if [ -z "$ACR_NAME" ]; then
             MISSING="${MISSING}AZURE_ACR_NAME, "
           fi
-          if [ -z "${{ vars.AZURE_WEBAPP_NAME }}" ]; then
+          if [ -z "$WEBAPP_NAME" ]; then
             MISSING="${MISSING}AZURE_WEBAPP_NAME, "
           fi
-          if [ -z "${{ vars.AZURE_RESOURCE_GROUP }}" ]; then
+          if [ -z "$RESOURCE_GROUP" ]; then
             MISSING="${MISSING}AZURE_RESOURCE_GROUP, "
           fi
           
           if [ -n "$MISSING" ]; then
             echo "❌ Missing variables: $MISSING" >> $GITHUB_STEP_SUMMARY
-            echo "Please run \`3️⃣ Infrastructure Setup\` first!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Option 1:** Run \`3️⃣ Infrastructure Setup\` first and set repository variables" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Option 2:** Re-run this workflow manually with inputs:" >> $GITHUB_STEP_SUMMARY
+            echo "- resource_group: \`your-resource-group\`" >> $GITHUB_STEP_SUMMARY
+            echo "- acr_name: \`yourcontainerregistry\`" >> $GITHUB_STEP_SUMMARY
+            echo "- webapp_name: \`your-webapp-name\`" >> $GITHUB_STEP_SUMMARY
             echo "ready=false" >> $GITHUB_OUTPUT
             exit 1
           fi
           
-          echo "✅ All required variables present" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | \`$RESOURCE_GROUP\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Registry | \`$ACR_NAME\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Web App | \`$WEBAPP_NAME\` |" >> $GITHUB_STEP_SUMMARY
+          
           echo "ready=true" >> $GITHUB_OUTPUT
+          echo "acr_name=$ACR_NAME" >> $GITHUB_OUTPUT
+          echo "webapp_name=$WEBAPP_NAME" >> $GITHUB_OUTPUT
+          echo "resource_group=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
 
   # ============================================================================
   # Stage 2: Run Tests
@@ -102,7 +141,7 @@ jobs:
   build:
     name: 🐳 Build & Push Image
     runs-on: ubuntu-latest
-    needs: test
+    needs: [preflight, test]
     outputs:
       image-tag: ${{ github.run_number }}
       image-sha: ${{ github.sha }}
@@ -119,7 +158,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to ACR
-        run: az acr login --name ${{ vars.AZURE_ACR_NAME }}
+        run: az acr login --name ${{ needs.preflight.outputs.acr_name }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -131,16 +170,16 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ vars.AZURE_ACR_NAME }}.azurecr.io/${{ env.DOCKER_IMAGE_NAME }}:latest
-            ${{ vars.AZURE_ACR_NAME }}.azurecr.io/${{ env.DOCKER_IMAGE_NAME }}:${{ github.run_number }}
-            ${{ vars.AZURE_ACR_NAME }}.azurecr.io/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+            ${{ needs.preflight.outputs.acr_name }}.azurecr.io/${{ needs.preflight.outputs.webapp_name }}:latest
+            ${{ needs.preflight.outputs.acr_name }}.azurecr.io/${{ needs.preflight.outputs.webapp_name }}:${{ github.run_number }}
+            ${{ needs.preflight.outputs.acr_name }}.azurecr.io/${{ needs.preflight.outputs.webapp_name }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '${{ vars.AZURE_ACR_NAME }}.azurecr.io/${{ env.DOCKER_IMAGE_NAME }}:${{ github.run_number }}'
+          image-ref: '${{ needs.preflight.outputs.acr_name }}.azurecr.io/${{ needs.preflight.outputs.webapp_name }}:${{ github.run_number }}'
           format: 'table'
           exit-code: '0'
           severity: 'CRITICAL,HIGH'
@@ -151,8 +190,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Registry | \`${{ vars.AZURE_ACR_NAME }}.azurecr.io\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | \`${{ env.DOCKER_IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Registry | \`${{ needs.preflight.outputs.acr_name }}.azurecr.io\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ needs.preflight.outputs.webapp_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Tag | \`${{ github.run_number }}\` |" >> $GITHUB_STEP_SUMMARY
 
       - name: Azure Logout
@@ -184,10 +223,10 @@ jobs:
   deploy:
     name: 🚀 Deploy to Azure
     runs-on: ubuntu-latest
-    needs: [build, approve-deploy]
+    needs: [preflight, build, approve-deploy]
     if: always() && needs.build.result == 'success' && (needs.approve-deploy.result == 'success' || needs.approve-deploy.result == 'skipped')
     outputs:
-      app-url: https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net
+      app-url: https://${{ needs.preflight.outputs.webapp_name }}.azurewebsites.net
 
     steps:
       - name: Azure Login (OIDC)
@@ -200,14 +239,14 @@ jobs:
       - name: Deploy to Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
-          images: ${{ vars.AZURE_ACR_NAME }}.azurecr.io/${{ env.DOCKER_IMAGE_NAME }}:${{ github.run_number }}
+          app-name: ${{ needs.preflight.outputs.webapp_name }}
+          images: ${{ needs.preflight.outputs.acr_name }}.azurecr.io/${{ needs.preflight.outputs.webapp_name }}:${{ github.run_number }}
 
       - name: Update App Settings
         run: |
           az webapp config appsettings set \
-            --name ${{ vars.AZURE_WEBAPP_NAME }} \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --name ${{ needs.preflight.outputs.webapp_name }} \
+            --resource-group ${{ needs.preflight.outputs.resource_group }} \
             --settings \
               DEPLOYMENT_VERSION=${{ github.run_number }} \
               DEPLOYMENT_SHA=${{ github.sha }} \
@@ -219,7 +258,7 @@ jobs:
       - name: Health Check
         id: health
         run: |
-          APP_URL="https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          APP_URL="https://${{ needs.preflight.outputs.webapp_name }}.azurewebsites.net"
           
           echo "### 🏥 Health Check" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -249,7 +288,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| App URL | https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net |" >> $GITHUB_STEP_SUMMARY
+          echo "| App URL | https://${{ needs.preflight.outputs.webapp_name }}.azurewebsites.net |" >> $GITHUB_STEP_SUMMARY
           echo "| Version | \`${{ github.run_number }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
 
@@ -263,7 +302,7 @@ jobs:
   rollback:
     name: ⏪ Rollback
     runs-on: ubuntu-latest
-    needs: deploy
+    needs: [preflight, deploy]
     if: failure()
 
     steps:
@@ -281,13 +320,13 @@ jobs:
           echo "### ⏪ Rolling back to version $PREV_VERSION" >> $GITHUB_STEP_SUMMARY
           
           az webapp config container set \
-            --name ${{ vars.AZURE_WEBAPP_NAME }} \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
-            --container-image-name "${{ vars.AZURE_ACR_NAME }}.azurecr.io/${{ env.DOCKER_IMAGE_NAME }}:$PREV_VERSION"
+            --name ${{ needs.preflight.outputs.webapp_name }} \
+            --resource-group ${{ needs.preflight.outputs.resource_group }} \
+            --container-image-name "${{ needs.preflight.outputs.acr_name }}.azurecr.io/${{ needs.preflight.outputs.webapp_name }}:$PREV_VERSION"
           
           az webapp restart \
-            --name ${{ vars.AZURE_WEBAPP_NAME }} \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }}
+            --name ${{ needs.preflight.outputs.webapp_name }} \
+            --resource-group ${{ needs.preflight.outputs.resource_group }}
 
       - name: Azure Logout
         if: always()
